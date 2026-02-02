@@ -3,19 +3,19 @@ import numpy as np
 import time
 import pandas as pd
 
-# Import Logic หลัก
+# Import Logic หลักจากไฟล์ bingo_core.py
 from bingo_core import BingoCardGenerator, BingoGameEngine, BingoMode, BingoValidator
 
 # ==========================================
 # 1. Config & Setup
 # ==========================================
 st.set_page_config(
-    page_title="BWN Bingo Demo",
+    page_title="Bingo Demonstration (Web)",
     page_icon="🎰",
     layout="wide"
 )
 
-# ฝัง CSS เพื่อแต่งหน้าตาตารางบิงโกให้สวยงาม (เหมือน Desktop App)
+# ฝัง CSS เพื่อแต่งหน้าตาตารางบิงโก
 st.markdown("""
 <style>
     .bingo-card {
@@ -57,18 +57,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. Session State Management (ตัวแปรจำค่า)
+# 2. Session State Management
 # ==========================================
 def init_session_state():
     defaults = {
-        'cards': None,          # เก็บการ์ดของผู้เล่นทุกคน
-        'marks': None,          # เก็บสถานะการกากบาท (True/False)
+        'cards': None,          # เก็บการ์ดของผู้เล่น
+        'marks': None,          # เก็บสถานะการกากบาท
         'draw_seq': [],         # ลำดับเลขที่จะสุ่ม
         'current_idx': 0,       # รอบปัจจุบัน
-        'last_num': "-",        # เลขล่าสุดที่ออก
+        'last_num': "-",        # เลขล่าสุด
         'game_over': False,     # จบเกมหรือยัง
-        'winner_msg': "",       # ข้อความประกาศคนชนะ
-        'win_highlights': None  # เก็บข้อมูลไฮไลท์แถวที่ชนะ (สีทอง)
+        'winner_msg': "",       # ข้อความผู้ชนะ
+        'win_highlights': None, # ไฮไลท์แถวที่ชนะ
+        'auto_running': False   # <--- ตัวแปรสำคัญสำหรับระบบ Auto
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -77,7 +78,7 @@ def init_session_state():
 init_session_state()
 
 # ==========================================
-# 3. Helper Functions (ฟังก์ชันคำนวณ)
+# 3. Helper Functions (Logic)
 # ==========================================
 def start_new_game(n, y, players, mode):
     try:
@@ -96,18 +97,16 @@ def start_new_game(n, y, players, mode):
         st.session_state.last_num = "-"
         st.session_state.game_over = False
         st.session_state.winner_msg = ""
-        st.session_state.win_highlights = np.zeros_like(st.session_state.marks, dtype=bool) # array เก็บว่าช่องไหนชนะ
+        st.session_state.win_highlights = np.zeros_like(st.session_state.marks, dtype=bool)
+        st.session_state.auto_running = False # รีเซ็ต Auto เมื่อเริ่มเกมใหม่
         
     except ValueError as e:
         st.error(f"Error: {e}")
 
 def check_winners(n, players):
-    """เช็คผู้ชนะและระบายสีทอง (Win Highlight logic)"""
+    """เช็คผู้ชนะและระบายสีทอง"""
     has_winner = False
-    
-    # Reset highlights
     st.session_state.win_highlights[:] = False 
-    
     marks = st.session_state.marks
     
     for p in range(players):
@@ -135,7 +134,6 @@ def check_winners(n, players):
         if np.all(np.diag(np.fliplr(p_marks))):
             is_p_winner = True
             rows, cols = np.diag_indices(n)
-            # cols for anti-diagonal are (n-1-0, n-1-1, ...)
             st.session_state.win_highlights[p, rows, n - 1 - cols] = True
 
         if is_p_winner:
@@ -144,9 +142,11 @@ def check_winners(n, players):
     return has_winner
 
 def next_turn(n, y, players):
+    """ฟังก์ชันเดินเกม 1 ตา"""
     if st.session_state.current_idx >= len(st.session_state.draw_seq):
         st.session_state.game_over = True
         st.session_state.winner_msg = "จบเกม! (เลขหมดกอง)"
+        st.session_state.auto_running = False # หยุด Auto
         return
 
     # 1. หยิบเลข
@@ -154,7 +154,7 @@ def next_turn(n, y, players):
     st.session_state.current_idx += 1
     st.session_state.last_num = number
     
-    # 2. Update Marks (Vectorized)
+    # 2. Update Marks
     matches = (st.session_state.cards == number)
     st.session_state.marks |= matches
     
@@ -162,10 +162,11 @@ def next_turn(n, y, players):
     if check_winners(n, players):
         st.session_state.game_over = True
         st.session_state.winner_msg = f"🎉 BINGO! จบเกมในรอบที่ {st.session_state.current_idx}"
-        st.balloons() # เอฟเฟกต์ลูกโป่ง
+        st.session_state.auto_running = False # หยุด Auto
+        st.balloons()
 
 # ==========================================
-# 4. UI Rendering (ส่วนแสดงผล)
+# 4. UI Rendering
 # ==========================================
 def render_bingo_card(player_idx, n):
     """สร้าง HTML Table สำหรับการ์ด 1 ใบ"""
@@ -180,23 +181,15 @@ def render_bingo_card(player_idx, n):
         html += "<tr>"
         for c in range(n):
             val = card[r, c]
-            is_marked = marks[r, c]
-            is_win = highlights[r, c]
             
-            # Determine Class Logic
-            if is_win:
-                css_class = "status-win"
-            elif val == 0:
-                css_class = "status-free"
-            elif is_marked:
-                css_class = "status-marked"
-            else:
-                css_class = "status-normal"
+            if highlights[r, c]: css_class = "status-win"
+            elif val == 0: css_class = "status-free"
+            elif marks[r, c]: css_class = "status-marked"
+            else: css_class = "status-normal"
                 
             txt = "FREE" if val == 0 else str(val)
             html += f"<td class='bingo-cell {css_class}'>{txt}</td>"
         html += "</tr>"
-    
     html += "</table></div>"
     return html
 
@@ -216,12 +209,12 @@ def main():
         mode = BingoMode.PURE_MATH if mode_label == "Pure Math" else BingoMode.FREE_SPACE
         
         st.divider()
-        
         col_layout = st.slider("จัดเรียงกระดาน (คอลัมน์)", 1, 6, 3)
         
         st.divider()
+        speed = st.slider("ความเร็ว Auto (วินาที/รอบ)", 0.1, 2.0, 0.5, step=0.1)
         
-        # New Game Button
+        st.divider()
         if st.button("🔄 เริ่มเกมใหม่ (Restart)", type="primary", use_container_width=True):
             start_new_game(n, y, players, mode)
             st.rerun()
@@ -229,51 +222,48 @@ def main():
     # --- Main Area ---
     st.title("🎲 Bingo Live Demo")
     
-    # Top Status Bar
-    col_stat1, col_stat2, col_stat3 = st.columns([1, 2, 1])
-    with col_stat1:
+    # Status Bar
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
         st.metric("รอบที่ (Turn)", f"{st.session_state.current_idx} / {y}")
-    with col_stat2:
-        # แสดงเลขตัวใหญ่ๆ
+    with col2:
         st.markdown(f"<h1 style='text-align: center; color: #ff4b4b; font-size: 50px; margin:0;'>{st.session_state.last_num}</h1>", unsafe_allow_html=True)
         st.markdown(f"<p style='text-align: center;'>เลขที่ออกล่าสุด</p>", unsafe_allow_html=True)
-    with col_stat3:
+    with col3:
         if st.session_state.game_over:
             st.success(st.session_state.winner_msg)
         else:
-            st.info("สถานะ: กำลังเล่น...")
+            status_text = "🟢 กำลังเล่นอัตโนมัติ..." if st.session_state.auto_running else "🟡 รอคำสั่ง..."
+            st.info(f"สถานะ: {status_text}")
 
-    # Action Buttons
+    # Buttons (Next / Auto)
     c1, c2 = st.columns(2)
     with c1:
         if st.button("▶️ สุ่มเลขถัดไป (Next)", use_container_width=True, 
-                     disabled=st.session_state.cards is None or st.session_state.game_over):
+                     disabled=st.session_state.cards is None or st.session_state.game_over or st.session_state.auto_running):
             next_turn(n, y, players)
             st.rerun()
             
     with c2:
-        # Auto Play Logic
-        # Streamlit ไม่มี Threading UI แบบ Desktop ดังนั้นใช้ Loop ธรรมดา
-        if st.button("⏩ เล่นอัตโนมัติ (Auto Run)", use_container_width=True,
+        # ปุ่ม Auto ทำหน้าที่เป็น Toggle (สวิตช์เปิด-ปิด)
+        auto_label = "⏹️ หยุด (Stop)" if st.session_state.auto_running else "⏩ เล่นอัตโนมัติ (Auto Run)"
+        if st.button(auto_label, use_container_width=True, 
                      disabled=st.session_state.cards is None or st.session_state.game_over):
-            
-            progress_text = st.empty()
-            while not st.session_state.game_over:
-                next_turn(n, y, players)
-                # update UI manual without full rerun (partial) is hard, so we just loop logic
-                # แต่เพื่อให้เห็นภาพเคลื่อนไหว เราต้อง sleep แล้ว rerun
-                time.sleep(0.1) # ปรับความเร็วตรงนี้
-                st.rerun()
+            # สลับค่า True <-> False
+            st.session_state.auto_running = not st.session_state.auto_running
+            st.rerun()
+
+    # --- Logic สำหรับ Auto Run (ทำงานภายนอกปุ่ม) ---
+    if st.session_state.auto_running and not st.session_state.game_over:
+        time.sleep(speed)  # หน่วงเวลาตามที่ตั้งค่า
+        next_turn(n, y, players)
+        st.rerun()         # สั่งรีโหลดหน้าใหม่ (Loop กลับไปเริ่ม Main)
 
     st.divider()
 
     # --- Game Board Area ---
     if st.session_state.cards is not None:
-        
-        # คำนวณ Grid Layout
-        # เช่น players=6, col_layout=3 -> ต้องมี 2 แถว
         rows = (players // col_layout) + (1 if players % col_layout > 0 else 0)
-        
         p_idx = 0
         for _ in range(rows):
             cols = st.columns(col_layout)
@@ -284,7 +274,7 @@ def main():
                         st.markdown(html_card, unsafe_allow_html=True)
                     p_idx += 1
     else:
-        st.warning("👈 กรุณากดปุ่ม 'เริ่มเกมใหม่' ทางด้านซ้ายเพื่อเริ่ม")
+        st.warning("👈 กรุณากดปุ่ม 'เริ่มเกมใหม่' เพื่อเริ่มต้น")
 
 if __name__ == "__main__":
     main()
