@@ -11,7 +11,7 @@ from bingo_core import BingoCardGenerator, BingoGameEngine, BingoMode, BingoVali
 # 1. Config & Setup (ตั้งค่าหน้าเว็บ)
 # ==========================================
 st.set_page_config(
-    page_title="Bingo Demonstration (Web)",
+    page_title="BWN Bingo Demo",
     page_icon="🎰",
     layout="wide"
 )
@@ -233,7 +233,7 @@ def main():
             st.rerun()
 
     # --- Main Area: พื้นที่แสดงผลหลัก ---
-    st.title("🎲 Bingo Live Demo")
+    st.title("🎲 BWN Bingo Demo")
     
     # Status Bar (แถบสถานะด้านบน)
     col_stat1, col_stat2, col_stat3 = st.columns([1, 2, 1])
