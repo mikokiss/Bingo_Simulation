@@ -113,61 +113,70 @@ class BingoWebApp:
         if not config['append_data']:
             st.session_state.results_data = []
 
-        # เริ่มวนลูป
+        # ลูปใหญ่ควบคุมโครงสร้างการรันจำลอง
         try:
             for n in config['n_vals']:
                 for y in config['y_vals']:
-                    
-                    # ตรวจสอบความถูกต้อง (Validation)
-                    final_mode, warnings = BingoValidator.validate(n, y, max(config['x_vals']), config['mode'])
-                    
-                    if warnings:
-                        st.warning(f"⚠️ คำเตือนที่ n={n}, y={y}: {warnings[0]}")
-                    
-                    # ตัวแปรสำหรับเก็บผลลัพธ์ย่อยเพื่อนำไปพลอตกราฟ
-                    batch_means = []
-                    batch_x = []
-                    last_hist_data = []
-
-                    for x in config['x_vals']:
-                        # อัปเดตสถานะหน้าจอ
-                        status_text.text(f"กำลังจำลอง... n={n}, y={y}, ผู้เล่น={x} ({current_iter + 1}/{total_iterations})")
+                    try:
+                        # --- ตรวจสอบความถูกต้อง (Validation) รายคู่ตัวแปร ---
+                        final_mode, warnings = BingoValidator.validate(n, y, max(config['x_vals']), config['mode'])
                         
-                        # --- Core Simulation Loop ---
-                        turns_in_this_group = []
-                        for _ in range(config['trials']):
-                            cards = BingoCardGenerator.generate_cards(n, y, x, final_mode)
-                            turns = BingoGameEngine.play_one_game(cards, y)
-                            turns_in_this_group.append(turns)
-                        # ----------------------------
-
-                        # คำนวณสถิติ
-                        mean_val = np.mean(turns_in_this_group)
-                        sd_val = np.std(turns_in_this_group)
+                        if warnings:
+                            st.warning(f"⚠️ คำเตือนที่ n={n}, y={y}: {warnings[0]}")
                         
-                        # บันทึกลง Session State
-                        st.session_state.results_data.append({
-                            "n": n, "y": y, "Players": x, "Trials": config['trials'],
-                            "Mean": round(mean_val, 4), "S.D.": round(sd_val, 4),
-                            "Min": int(np.min(turns_in_this_group)), 
-                            "Max": int(np.max(turns_in_this_group))
-                        })
+                        # ตัวแปรสำหรับเก็บผลลัพธ์ย่อยเพื่อนำไปพลอตกราฟ
+                        batch_means = []
+                        batch_x = []
+                        last_hist_data = []
 
-                        # เก็บข้อมูลสำหรับกราฟ
-                        batch_means.append(mean_val)
-                        batch_x.append(x)
-                        last_hist_data = turns_in_this_group
+                        for x in config['x_vals']:
+                            # อัปเดตสถานะหน้าจอ
+                            status_text.text(f"กำลังจำลอง... n={n}, y={y}, ผู้เล่น={x} ({current_iter + 1}/{total_iterations})")
+                            
+                            # --- Core Simulation Loop ---
+                            turns_in_this_group = []
+                            for _ in range(config['trials']):
+                                cards = BingoCardGenerator.generate_cards(n, y, x, final_mode)
+                                turns = BingoGameEngine.play_one_game(cards, y)
+                                turns_in_this_group.append(turns)
+                            # ----------------------------
+
+                            # คำนวณสถิติ
+                            mean_val = np.mean(turns_in_this_group)
+                            sd_val = np.std(turns_in_this_group)
+                            
+                            # บันทึกลง Session State
+                            st.session_state.results_data.append({
+                                "n": n, "y": y, "Players": x, "Trials": config['trials'],
+                                "Mean": round(mean_val, 4), "S.D.": round(sd_val, 4),
+                                "Min": int(np.min(turns_in_this_group)), 
+                                "Max": int(np.max(turns_in_this_group))
+                            })
+
+                            # เก็บข้อมูลสำหรับกราฟ
+                            batch_means.append(mean_val)
+                            batch_x.append(x)
+                            last_hist_data = turns_in_this_group
+                            
+                            current_iter += 1
+                            progress_bar.progress(min(current_iter / total_iterations, 1.0))
+
+                        # จบลูปย่อย x: แสดงกราฟทันที (Real-time update logic)
+                        self.display_charts(batch_x, batch_means, last_hist_data, n, y, config['trials'])
+
+                    except ValueError as e:
+                        # [จุดแก้ไขสำคัญ] ดักจับค่าพารามิเตอร์ที่ไม่ผ่านเกณฑ์คณิตศาสตร์
+                        st.warning(f"⚠️ ข้ามชุดตัวแปร n={n}, y={y}: {str(e)}")
                         
-                        current_iter += 1
-                        progress_bar.progress(current_iter / total_iterations)
-
-                    # จบลูปย่อย x: แสดงกราฟทันที (Real-time update logic)
-                    self.display_charts(batch_x, batch_means, last_hist_data, n, y, config['trials'])
+                        # ชดเชยค่า Iteration ของผู้เล่น (x) ทั้งหมดในรอบนี้ เพื่อให้เข็ม Progress Bar เดินหน้าต่ออย่างถูกต้อง ไม่ค้างคา
+                        current_iter += len(config['x_vals'])
+                        progress_bar.progress(min(current_iter / total_iterations, 1.0))
+                        continue
 
             status_text.success("✅ การจำลองเสร็จสิ้นเรียบร้อย!")
             
         except Exception as e:
-            st.error(f"⛔ เกิดข้อผิดพลาด: {str(e)}")
+            st.error(f"⛔ เกิดข้อผิดพลาดร้ายแรงในระบบ: {str(e)}")
 
     def display_charts(self, x_vals, y_means, hist_data, n, y, trials):
         """แสดงกราฟโดยใช้ Matplotlib ผ่าน Streamlit"""
@@ -250,5 +259,4 @@ class BingoWebApp:
 # ==========================================
 if __name__ == "__main__":
     app = BingoWebApp()
-
     app.main()
